@@ -1420,7 +1420,7 @@ static int bmc150_accel_buffer_postenable(struct iio_dev *indio_dev)
 	int ret = 0;
 
 	if (indio_dev->currentmode == INDIO_BUFFER_TRIGGERED)
-		return iio_triggered_buffer_postenable(indio_dev);
+		return 0;
 
 	mutex_lock(&data->mutex);
 
@@ -1452,7 +1452,7 @@ static int bmc150_accel_buffer_predisable(struct iio_dev *indio_dev)
 	struct bmc150_accel_data *data = iio_priv(indio_dev);
 
 	if (indio_dev->currentmode == INDIO_BUFFER_TRIGGERED)
-		return iio_triggered_buffer_predisable(indio_dev);
+		return 0;
 
 	mutex_lock(&data->mutex);
 
@@ -1583,7 +1583,6 @@ int bmc150_accel_core_probe(struct device *dev, struct regmap *regmap, int irq,
 
 	mutex_init(&data->mutex);
 
-	indio_dev->dev.parent = dev;
 	indio_dev->channels = data->chip_info->channels;
 	indio_dev->num_channels = data->chip_info->num_channels;
 	indio_dev->name = name ? name : data->chip_info->name;
@@ -1649,11 +1648,14 @@ int bmc150_accel_core_probe(struct device *dev, struct regmap *regmap, int irq,
 	ret = iio_device_register(indio_dev);
 	if (ret < 0) {
 		dev_err(dev, "Unable to register iio device\n");
-		goto err_trigger_unregister;
+		goto err_pm_cleanup;
 	}
 
 	return 0;
 
+err_pm_cleanup:
+	pm_runtime_dont_use_autosuspend(dev);
+	pm_runtime_disable(dev);
 err_trigger_unregister:
 	bmc150_accel_unregister_triggers(data, BMC150_ACCEL_TRIGGERS - 1);
 err_buffer_cleanup:

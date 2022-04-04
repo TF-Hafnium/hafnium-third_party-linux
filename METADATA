@@ -4,9 +4,9 @@ description: "Linux kernel snapshot. FOR DEVELOPMENT ONLY!"
 third_party {
   url {
     type: ARCHIVE
-    value: "https://cdn.kernel.org/pub/linux/kernel/v5.x/linux-5.4.148.tar.gz"
+    value: "https://cdn.kernel.org/pub/linux/kernel/v5.x/linux-5.10.109.tar.xz"
   }
-  version: "5.4.148"
-  last_upgrade_date { year: 2021 month: 09 day: 23 }
+  version: "5.10.109"
+  last_upgrade_date { year: 2022 month: 04 day: 04 }
   license_type: RESTRICTED
 }

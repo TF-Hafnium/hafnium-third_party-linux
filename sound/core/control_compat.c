@@ -22,24 +22,22 @@ struct snd_ctl_elem_list32 {
 static int snd_ctl_elem_list_compat(struct snd_card *card,
 				    struct snd_ctl_elem_list32 __user *data32)
 {
-	struct snd_ctl_elem_list __user *data;
+	struct snd_ctl_elem_list data = {};
 	compat_caddr_t ptr;
 	int err;
 
-	data = compat_alloc_user_space(sizeof(*data));
-
 	/* offset, space, used, count */
-	if (copy_in_user(data, data32, 4 * sizeof(u32)))
+	if (copy_from_user(&data, data32, 4 * sizeof(u32)))
 		return -EFAULT;
 	/* pids */
-	if (get_user(ptr, &data32->pids) ||
-	    put_user(compat_ptr(ptr), &data->pids))
+	if (get_user(ptr, &data32->pids))
 		return -EFAULT;
-	err = snd_ctl_elem_list(card, data);
+	data.pids = compat_ptr(ptr);
+	err = snd_ctl_elem_list(card, &data);
 	if (err < 0)
 		return err;
 	/* copy the result */
-	if (copy_in_user(data32, data, 4 * sizeof(u32)))
+	if (copy_to_user(data32, &data, 4 * sizeof(u32)))
 		return -EFAULT;
 	return 0;
 }
@@ -223,7 +221,7 @@ static int copy_ctl_value_from_user(struct snd_card *card,
 {
 	struct snd_ctl_elem_value32 __user *data32 = userdata;
 	int i, type, size;
-	int uninitialized_var(count);
+	int count;
 	unsigned int indirect;
 
 	if (copy_from_user(&data->id, &data32->id, sizeof(data->id)))
@@ -266,6 +264,7 @@ static int copy_ctl_value_to_user(void __user *userdata,
 				  struct snd_ctl_elem_value *data,
 				  int type, int count)
 {
+	struct snd_ctl_elem_value32 __user *data32 = userdata;
 	int i, size;
 
 	if (type == SNDRV_CTL_ELEM_TYPE_BOOLEAN ||
@@ -282,6 +281,8 @@ static int copy_ctl_value_to_user(void __user *userdata,
 		if (copy_to_user(valuep, data->value.bytes.data, size))
 			return -EFAULT;
 	}
+	if (copy_to_user(&data32->id, &data->id, sizeof(data32->id)))
+		return -EFAULT;
 	return 0;
 }
 

@@ -68,7 +68,7 @@ static int siw_rx_umem(struct siw_rx_stream *srx, struct siw_umem *umem,
 			return -EFAULT;
 		}
 		if (srx->mpa_crc_hd) {
-			if (rx_qp(srx)->kernel_verbs) {
+			if (rdma_is_kernel_res(&rx_qp(srx)->base_qp.res)) {
 				crypto_shash_update(srx->mpa_crc_hd,
 					(u8 *)(dest + pg_off), bytes);
 				kunmap_atomic(dest);
@@ -389,7 +389,7 @@ static struct siw_wqe *siw_rqe_get(struct siw_qp *qp)
 				struct siw_rqe *rqe2 = &srq->recvq[off];
 
 				if (!(rqe2->flags & SIW_WQE_VALID)) {
-					srq->armed = 0;
+					srq->armed = false;
 					srq_event = true;
 				}
 			}
@@ -1153,10 +1153,11 @@ static int siw_check_tx_fence(struct siw_qp *qp)
 
 	spin_lock_irqsave(&qp->orq_lock, flags);
 
-	rreq = orq_get_current(qp);
-
 	/* free current orq entry */
+	rreq = orq_get_current(qp);
 	WRITE_ONCE(rreq->flags, 0);
+
+	qp->orq_get++;
 
 	if (qp->tx_ctx.orq_fence) {
 		if (unlikely(tx_waiting->wr_status != SIW_WR_QUEUED)) {
@@ -1165,10 +1166,12 @@ static int siw_check_tx_fence(struct siw_qp *qp)
 			rv = -EPROTO;
 			goto out;
 		}
-		/* resume SQ processing */
+		/* resume SQ processing, if possible */
 		if (tx_waiting->sqe.opcode == SIW_OP_READ ||
 		    tx_waiting->sqe.opcode == SIW_OP_READ_LOCAL_INV) {
-			rreq = orq_get_tail(qp);
+
+			/* SQ processing was stopped because of a full ORQ */
+			rreq = orq_get_free(qp);
 			if (unlikely(!rreq)) {
 				pr_warn("siw: [QP %u]: no ORQE\n", qp_id(qp));
 				rv = -EPROTO;
@@ -1181,15 +1184,14 @@ static int siw_check_tx_fence(struct siw_qp *qp)
 			resume_tx = 1;
 
 		} else if (siw_orq_empty(qp)) {
+			/*
+			 * SQ processing was stopped by fenced work request.
+			 * Resume since all previous Read's are now completed.
+			 */
 			qp->tx_ctx.orq_fence = 0;
 			resume_tx = 1;
-		} else {
-			pr_warn("siw: [QP %u]: fence resume: orq idx: %d:%d\n",
-				qp_id(qp), qp->orq_get, qp->orq_put);
-			rv = -EPROTO;
 		}
 	}
-	qp->orq_get++;
 out:
 	spin_unlock_irqrestore(&qp->orq_lock, flags);
 
@@ -1223,7 +1225,7 @@ static int siw_rdmap_complete(struct siw_qp *qp, int error)
 	case RDMAP_SEND_SE:
 	case RDMAP_SEND_SE_INVAL:
 		wqe->rqe.flags |= SIW_WQE_SOLICITED;
-		/* Fall through */
+		fallthrough;
 
 	case RDMAP_SEND:
 	case RDMAP_SEND_INVAL:
@@ -1273,7 +1275,7 @@ static int siw_rdmap_complete(struct siw_qp *qp, int error)
 
 			if (wc_status == SIW_WC_SUCCESS)
 				wc_status = SIW_WC_GENERAL_ERR;
-		} else if (qp->kernel_verbs &&
+		} else if (rdma_is_kernel_res(&qp->base_qp.res) &&
 			   rx_type(wqe) == SIW_OP_READ_LOCAL_INV) {
 			/*
 			 * Handle any STag invalidation request
@@ -1396,7 +1398,7 @@ int siw_tcp_rx_data(read_descriptor_t *rd_desc, struct sk_buff *skb,
 			 * DDP segment.
 			 */
 			qp->rx_fpdu->first_ddp_seg = 0;
-			/* Fall through */
+			fallthrough;
 
 		case SIW_GET_DATA_START:
 			/*
